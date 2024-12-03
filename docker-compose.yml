@@ -1,4 +1,3 @@
-version: "3"
 services:
   postgres:
     image: library/postgres:13
@@ -10,11 +9,86 @@ services:
       POSTGRES_DB: postgres
     volumes:
       - db-data:/var/lib/postgresql/data
-      - ./postgres/:/docker-entrypoint-initdb.d/
+      - ./postgres/:/docker-entrypoint-initdb.d
     ports:
       - "5432:5432"
+    networks:
+      - my_persistent_network
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
-# TODO добавить сервисы
+  reservation:
+    build: 
+      context: .
+      dockerfile: ./deploys/reservation.Dockerfile
+    container_name: reservation
+    restart: on-failure
+    environment:
+      RESERVATION_DB : postgresql://postgres:postgres@postgres:5432/reservations?sslmode=disable
+    ports:
+      - "8070:8070"
+    networks:
+      - my_persistent_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  payment:
+    build:
+      context: .
+      dockerfile: ./deploys/payment.Dockerfile
+    container_name: payment
+    restart: on-failure
+    environment:
+      PAYMENT_DB: postgresql://postgres:postgres@postgres:5432/payments?sslmode=disable
+    ports:
+      - "8060:8060"
+    networks:
+      - my_persistent_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+  
+  loyalty:
+    build:
+      context: .
+      dockerfile: ./deploys/loyalty.Dockerfile
+    container_name: loyalty
+    restart: on-failure
+    environment:
+      LOYALTY_DB: postgresql://postgres:postgres@postgres:5432/loyalties?sslmode=disable
+    ports:
+      - "8050:8050"
+    networks:
+      - my_persistent_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+  
+  gateway:
+    build:
+      context: .
+      dockerfile: ./deploys/gateway.Dockerfile
+    container_name: gateway
+    restart: on-failure
+    environment:
+      LOYALTY_SERVICE: http://loyalty:8050/api/loyalty
+      RESERVATION_SERVICE: http://reservation:8070/api/reservation
+      PAYMENT_SERVICE: http://payment:8060/api/payment
+    ports:
+      - "8080:8080"
+    networks:
+      - my_persistent_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+networks:
+  my_persistent_network:
+    driver: bridge
 
 volumes:
   db-data:
