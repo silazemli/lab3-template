@@ -82,8 +82,11 @@ func (srv *Server) GetUser(ctx echo.Context) error {
 	if err != nil {
 		theLoyalty = loyalty.Loyalty{}
 	}
+
 	loyaltyResponse := createLoyaltyResponseNoCount(theLoyalty) // out of ideas for names
-	loyaltyResponse.Discount = ""
+	if err != nil {
+		loyaltyResponse.Discount = ""
+	}
 
 	response.Loyalty = loyaltyResponse
 
