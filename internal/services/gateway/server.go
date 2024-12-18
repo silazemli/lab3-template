@@ -303,7 +303,7 @@ func (srv *Server) CancelReservation(ctx echo.Context) error {
 	err = srv.loyalty.DecrementCounter(username)
 	if err != nil {
 		log.Info().Msg(err.Error())
-		return ctx.JSON(http.StatusBadGateway, echo.Map{})
+		return ctx.JSON(http.StatusNoContent, echo.Map{})
 	}
 	return ctx.JSON(http.StatusNoContent, echo.Map{})
 }
