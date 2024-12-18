@@ -86,10 +86,10 @@ func (srv *Server) GetUser(ctx echo.Context) error {
 	loyaltyResponse := createLoyaltyResponseNoCount(theLoyalty) // out of ideas for names
 	if err != nil {
 		loyaltyResponse.Discount = ""
+		ctx.Response().Write([]byte("Loyalty Service Unavailable"))
 	}
 	response.Loyalty = loyaltyResponse
 
-	ctx.Response().Write([]byte("Loyalty Service Unavailable"))
 	return ctx.JSON(http.StatusOK, response)
 }
 
