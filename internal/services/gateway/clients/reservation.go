@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/silazemli/lab2-template/internal/services/reservation"
+	"github.com/silazemli/lab3-template/internal/services/reservation"
 )
 
 type ReservationClient struct {

@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/silazemli/lab2-template/internal/services/gateway"
+	"github.com/silazemli/lab3-template/internal/services/gateway"
 )
 
 func main() {

@@ -3,9 +3,9 @@ package gateway
 import (
 	"strconv"
 
-	"github.com/silazemli/lab2-template/internal/services/loyalty"
-	"github.com/silazemli/lab2-template/internal/services/payment"
-	"github.com/silazemli/lab2-template/internal/services/reservation"
+	"github.com/silazemli/lab3-template/internal/services/loyalty"
+	"github.com/silazemli/lab3-template/internal/services/payment"
+	"github.com/silazemli/lab3-template/internal/services/reservation"
 )
 
 type paymentResponse struct {
@@ -55,7 +55,7 @@ type reservationCreatedResponse struct {
 	Payment        paymentResponse `json:"payment"`
 }
 
-func (srv *server) createReservationResponse(theReservation reservation.Reservation) reservationResponse {
+func (srv *Server) createReservationResponse(theReservation reservation.Reservation) reservationResponse {
 	response := reservationResponse{}
 	response.ReservationUID = theReservation.ReservationUID
 	response.StartDate = ymd(theReservation.StartDate)
@@ -68,11 +68,12 @@ func (srv *server) createReservationResponse(theReservation reservation.Reservat
 	}
 	response.Hotel = createHotelResponse(hotel)
 
-	payment, err := srv.payment.GetPayment(theReservation.PaymentUID)
+	thePayment, err := srv.payment.GetPayment(theReservation.PaymentUID)
 	if err != nil {
-		return reservationResponse{}
+		thePayment = payment.Payment{}
 	}
-	response.Payment = createPaymentResponse(payment)
+
+	response.Payment = createPaymentResponse(thePayment)
 
 	return response
 }
@@ -108,7 +109,7 @@ func createLoyaltyResponseNoCount(theLoyalty loyalty.Loyalty) loyaltyResponseNoC
 	}
 }
 
-func (srv *server) createReservationCreatedResponse(theReservation reservation.Reservation) reservationCreatedResponse {
+func (srv *Server) createReservationCreatedResponse(theReservation reservation.Reservation) reservationCreatedResponse {
 	response := reservationCreatedResponse{}
 	response.ReservationUID = theReservation.ReservationUID
 	response.StartDate = ymd(theReservation.StartDate)

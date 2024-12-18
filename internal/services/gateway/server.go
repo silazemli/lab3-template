@@ -8,50 +8,54 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/RohanPoojary/gomq"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/rs/zerolog/log"
-	"github.com/silazemli/lab2-template/internal/services/gateway/clients"
-	"github.com/silazemli/lab2-template/internal/services/payment"
-	"github.com/silazemli/lab2-template/internal/services/reservation"
+	log "github.com/rs/zerolog/log"
+	circuit "github.com/rubyist/circuitbreaker"
+	"github.com/silazemli/lab3-template/internal/services/gateway/async"
+	"github.com/silazemli/lab3-template/internal/services/gateway/clients"
+	"github.com/silazemli/lab3-template/internal/services/loyalty"
+	"github.com/silazemli/lab3-template/internal/services/payment"
+	"github.com/silazemli/lab3-template/internal/services/reservation"
 )
 
-type server struct {
+type Server struct {
 	srv         echo.Echo
 	cfg         Config
+	broker      gomq.Broker
 	reservation clients.ReservationClient
 	payment     clients.PaymentClient
 	loyalty     clients.LoyaltyClient
 }
 
-func NewServer() server {
-	srv := server{}
+func NewServer() Server {
+	srv := Server{}
 	srv.srv = *echo.New()
 	srv.cfg = *NewConfig()
 
-	client := &http.Client{
-		Transport: &http.Transport{MaxConnsPerHost: 100},
-		Timeout:   5 * time.Second,
-	}
-	srv.loyalty = *clients.NewLoyaltyClient(client, srv.cfg.LoyaltyService)
-	srv.payment = *clients.NewPaymentClient(client, srv.cfg.PaymentService)
-	srv.reservation = *clients.NewReservationClient(client, srv.cfg.ReservationService)
+	srv.loyalty = *clients.NewLoyaltyClient(circuit.NewHTTPClient(0, 10, nil), srv.cfg.LoyaltyService)
+	srv.payment = *clients.NewPaymentClient(circuit.NewHTTPClient(0, 10, nil), srv.cfg.PaymentService)
+	srv.reservation = *clients.NewReservationClient(circuit.NewHTTPClient(0, 10, nil), srv.cfg.ReservationService)
+
+	srv.broker = gomq.NewAsyncBroker()
+	async.LoyaltyDecrementRetry(srv.broker, &srv.loyalty)
 
 	api := srv.srv.Group("/api/v1")
-	api.GET("/hotels", srv.GetAllHotels)                               // +
-	api.GET("/me", srv.GetUser)                                        // +?
-	api.GET("/loyalty", srv.GetStatus)                                 // +
-	api.GET("/reservations", srv.GetAllReservations)                   // +?
-	api.GET("/reservations/:reservationUid", srv.GetReservation)       // +
-	api.POST("/reservations", srv.MakeReservation)                     // +?
-	api.DELETE("/reservations/:reservationUid", srv.CancelReservation) // +?
+	api.GET("/hotels", srv.GetAllHotels)                               // 500
+	api.GET("/me", srv.GetUser)                                        // 500
+	api.GET("/loyalty", srv.GetStatus)                                 // 500
+	api.GET("/reservations", srv.GetAllReservations)                   // 500 если недоступен reservation или пустой payment
+	api.GET("/reservations/:reservationUid", srv.GetReservation)       // 500
+	api.POST("/reservations", srv.MakeReservation)                     // если что-то недоступно, откатить payment
+	api.DELETE("/reservations/:reservationUid", srv.CancelReservation) // если недоступен payment, 500
 
 	srv.srv.GET("/manage/health", srv.HealthCheck)
 
 	return srv
 }
 
-func (srv *server) Start() error {
+func (srv *Server) Start() error {
 	err := srv.srv.Start(":8080")
 	if err != nil {
 		return err
@@ -59,14 +63,14 @@ func (srv *server) Start() error {
 	return nil
 }
 
-func (srv *server) GetUser(ctx echo.Context) error {
+func (srv *Server) GetUser(ctx echo.Context) error {
 	username := ctx.Request().Header.Get("X-User-Name")
 	response := userInfoResponse{}
 
 	reservations, err := srv.reservation.GetReservations(username) // create a list of reservations
 	if err != nil {
-		log.Info().Msg(err.Error())
-		return ctx.JSON(http.StatusBadGateway, echo.Map{"error": err})
+		reservations = make([]reservation.Reservation, 1)
+		reservations[0] = reservation.Reservation{}
 	}
 	reservationsResponse := make([]reservationResponse, len(reservations))
 	for index, theReservation := range reservations {
@@ -74,18 +78,17 @@ func (srv *server) GetUser(ctx echo.Context) error {
 	}
 	response.Reservations = reservationsResponse
 
-	loyalty, err := srv.loyalty.GetUser(username) // create this specific loyalty response
+	theLoyalty, err := srv.loyalty.GetUser(username) // create this specific loyalty response
 	if err != nil {
-		log.Info().Msg(err.Error())
-		return ctx.JSON(http.StatusBadGateway, echo.Map{"error": err})
+		theLoyalty = loyalty.Loyalty{}
 	}
-	loyaltyResponse := createLoyaltyResponseNoCount(loyalty) // out of ideas for names
+	loyaltyResponse := createLoyaltyResponseNoCount(theLoyalty) // out of ideas for names
 	response.Loyalty = loyaltyResponse
 
 	return ctx.JSON(http.StatusOK, response)
 }
 
-func (srv *server) GetAllHotels(ctx echo.Context) error {
+func (srv *Server) GetAllHotels(ctx echo.Context) error {
 	pageStr := ctx.QueryParam("page")
 	sizeStr := ctx.QueryParam("size")
 
@@ -113,7 +116,7 @@ func (srv *server) GetAllHotels(ctx echo.Context) error {
 	hotels, err := srv.reservation.GetAllHotels()
 	if err != nil {
 		log.Info().Msg(err.Error())
-		return ctx.JSON(http.StatusBadGateway, echo.Map{"error": err})
+		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err})
 	}
 
 	start := (page - 1) * size
@@ -140,12 +143,12 @@ func (srv *server) GetAllHotels(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, response)
 }
 
-func (srv *server) GetAllReservations(ctx echo.Context) error {
+func (srv *Server) GetAllReservations(ctx echo.Context) error {
 	username := ctx.Request().Header.Get("X-User-Name")
 	reservations, err := srv.reservation.GetReservations(username)
 	if err != nil {
 		log.Info().Msg(err.Error())
-		return ctx.JSON(http.StatusBadGateway, echo.Map{"error": err})
+		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err})
 	}
 	response := make([]reservationResponse, len(reservations))
 	for index, theReservation := range reservations {
@@ -154,13 +157,13 @@ func (srv *server) GetAllReservations(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, response)
 }
 
-func (srv *server) GetReservation(ctx echo.Context) error {
+func (srv *Server) GetReservation(ctx echo.Context) error {
 	username := ctx.Request().Header.Get("X-User-Name")
 	reservationUID := ctx.Param("reservationUid")
 	theReservation, err := srv.reservation.GetReservation(reservationUID)
 	if err != nil {
 		log.Info().Msg(err.Error())
-		return ctx.JSON(http.StatusNotFound, echo.Map{"error": err})
+		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err})
 	}
 	if username != theReservation.Username {
 		return ctx.JSON(http.StatusForbidden, echo.Map{"error": err})
@@ -169,19 +172,19 @@ func (srv *server) GetReservation(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, response)
 }
 
-func (srv *server) GetStatus(ctx echo.Context) error {
+func (srv *Server) GetStatus(ctx echo.Context) error {
 	username := ctx.Request().Header.Get("X-User-Name")
 	loyalty, err := srv.loyalty.GetUser(username)
 	if err != nil {
 		log.Info().Msg(err.Error())
-		return ctx.JSON(http.StatusBadGateway, echo.Map{"error": err})
+		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err})
 	}
 	response := createLoyaltyResponse(loyalty)
 
 	return ctx.JSON(http.StatusOK, response)
 }
 
-func (srv *server) MakeReservation(ctx echo.Context) error {
+func (srv *Server) MakeReservation(ctx echo.Context) error {
 	body, err := io.ReadAll(ctx.Request().Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %w", err) // parse request
@@ -200,7 +203,7 @@ func (srv *server) MakeReservation(ctx echo.Context) error {
 	hotelID, err := srv.reservation.GetHotelID(hotelUID) // getting hotel ID and hotel by ID for some reason
 	if err != nil {
 		log.Info().Msg(err.Error())
-		return fmt.Errorf("hotel does not exist: %w", err)
+		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err})
 	}
 	hotel, err := srv.reservation.GetHotel(strconv.Itoa(hotelID))
 	if err != nil {
@@ -242,7 +245,7 @@ func (srv *server) MakeReservation(ctx echo.Context) error {
 	err = srv.payment.CreatePayment(thePayment)
 	if err != nil {
 		log.Info().Msg(err.Error())
-		return ctx.JSON(http.StatusBadGateway, echo.Map{"error": err})
+		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err})
 	}
 
 	theReservation := reservation.Reservation{
@@ -264,13 +267,14 @@ func (srv *server) MakeReservation(ctx echo.Context) error {
 	err = srv.loyalty.IncrementCounter(username)
 	if err != nil {
 		log.Info().Msg(err.Error())
-		return ctx.JSON(http.StatusBadGateway, echo.Map{"error": err})
+		srv.payment.CancelPayment(thePayment.PaymentUID)
+		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err})
 	}
 
 	return ctx.JSON(http.StatusOK, srv.createReservationCreatedResponse(theReservation))
 }
 
-func (srv *server) CancelReservation(ctx echo.Context) error {
+func (srv *Server) CancelReservation(ctx echo.Context) error {
 	reservationUID := ctx.Param("reservationUid")
 	err := srv.reservation.CancelReservation(reservationUID)
 	if err != nil {
@@ -283,6 +287,7 @@ func (srv *server) CancelReservation(ctx echo.Context) error {
 		log.Info().Msg(err.Error())
 		return ctx.JSON(http.StatusBadGateway, echo.Map{})
 	}
+
 	err = srv.payment.CancelPayment(reservation.PaymentUID)
 	if err != nil {
 		log.Info().Msg(err.Error())
@@ -298,6 +303,6 @@ func (srv *server) CancelReservation(ctx echo.Context) error {
 	return ctx.JSON(http.StatusNoContent, echo.Map{})
 }
 
-func (srv *server) HealthCheck(ctx echo.Context) error {
+func (srv *Server) HealthCheck(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, echo.Map{})
 }
