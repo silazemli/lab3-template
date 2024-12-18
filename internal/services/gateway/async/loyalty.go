@@ -32,9 +32,8 @@ func LoyaltyDecrementRetry(broker gomq.Broker, loyaltyClient *clients.LoyaltyCli
 
 			err := loyaltyClient.DecrementCounter(retry.Username)
 			if err != nil {
-				broker.Publish("decrement loyalty counter", Retry{Username: retry.Username})
+				broker.Publish("decrement loyalty counter", Retry{Username: retry.Username, Time: time.Now()})
 			}
-
 		}
 	}()
 }

@@ -303,6 +303,7 @@ func (srv *Server) CancelReservation(ctx echo.Context) error {
 	err = srv.loyalty.DecrementCounter(username)
 	if err != nil {
 		log.Info().Msg(err.Error())
+		srv.broker.Publish("decrement loyalty counter", async.Retry{Username: username, Time: time.Now()})
 		return ctx.JSON(http.StatusNoContent, echo.Map{})
 	}
 	return ctx.JSON(http.StatusNoContent, echo.Map{})
