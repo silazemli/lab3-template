@@ -15,6 +15,7 @@ import (
 	circuit "github.com/rubyist/circuitbreaker"
 	"github.com/silazemli/lab3-template/internal/services/gateway/async"
 	"github.com/silazemli/lab3-template/internal/services/gateway/clients"
+	"github.com/silazemli/lab3-template/internal/services/loyalty"
 	"github.com/silazemli/lab3-template/internal/services/payment"
 	"github.com/silazemli/lab3-template/internal/services/reservation"
 )
@@ -77,13 +78,15 @@ func (srv *Server) GetUser(ctx echo.Context) error {
 	}
 	response.Reservations = reservationsResponse
 
-	theLoyalty, err := srv.loyalty.GetUser(username)
+	theLoyalty, err := srv.loyalty.GetUser(username) // create this specific loyalty response
 	if err != nil {
-		return ctx.JSON(http.StatusOK, echo.Map{"reservations": reservationsResponse})
+		theLoyalty = loyalty.Loyalty{}
 	}
 
-	loyaltyResponse := createLoyaltyResponseNoCount(theLoyalty)
-
+	loyaltyResponse := createLoyaltyResponseNoCount(theLoyalty) // out of ideas for names
+	if err != nil {
+		loyaltyResponse.Discount = ""
+	}
 	response.Loyalty = loyaltyResponse
 
 	return ctx.JSON(http.StatusOK, response)
@@ -178,7 +181,6 @@ func (srv *Server) GetStatus(ctx echo.Context) error {
 	loyalty, err := srv.loyalty.GetUser(username)
 	if err != nil {
 		log.Info().Msg(err.Error())
-		ctx.Response().Write([]byte("Loyalty Service Unavailable"))
 		return ctx.JSON(http.StatusServiceUnavailable, echo.Map{"error": err})
 	}
 	response := createLoyaltyResponse(loyalty)
@@ -270,10 +272,9 @@ func (srv *Server) MakeReservation(ctx echo.Context) error {
 	if err != nil {
 		log.Info().Msg(err.Error())
 		srv.payment.CancelPayment(thePayment.PaymentUID)
-		ctx.Response().Write([]byte("Loyalty Service unavailable"))
 		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err})
 	}
-	ctx.Response().Write([]byte("Loyalty Service unavailable"))
+
 	return ctx.JSON(http.StatusOK, srv.createReservationCreatedResponse(theReservation))
 }
 
