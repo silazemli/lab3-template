@@ -182,7 +182,7 @@ func (srv *Server) GetStatus(ctx echo.Context) error {
 	loyalty, err := srv.loyalty.GetUser(username)
 	if err != nil {
 		log.Info().Msg(err.Error())
-		return ctx.JSON(http.StatusServiceUnavailable, "Loyalty Service Unavailable")
+		return ctx.JSON(http.StatusServiceUnavailable, echo.Map{"message": "Loyalty Service Unavailable"})
 	}
 	response := createLoyaltyResponse(loyalty)
 
@@ -273,8 +273,7 @@ func (srv *Server) MakeReservation(ctx echo.Context) error {
 	if err != nil {
 		log.Info().Msg(err.Error())
 		srv.payment.CancelPayment(thePayment.PaymentUID)
-		ctx.Response().Write([]byte("Loyalty Service Unavailable"))
-		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err})
+		return ctx.JSON(http.StatusInternalServerError, echo.Map{"message": "Loyalty Service Unavailable"})
 	}
 
 	return ctx.JSON(http.StatusOK, srv.createReservationCreatedResponse(theReservation))
