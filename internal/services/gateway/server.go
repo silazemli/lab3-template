@@ -85,10 +85,11 @@ func (srv *Server) GetUser(ctx echo.Context) error {
 
 	loyaltyResponse := createLoyaltyResponseNoCount(theLoyalty) // out of ideas for names
 	if err != nil {
-		loyaltyResponse.Discount = ""
-		ctx.Response().Write([]byte("Loyalty Service Unavailable"))
+		return ctx.JSON(http.StatusOK, echo.Map{"reservations": reservationsResponse})
+		// ctx.Response().Write([]byte("Loyalty Service Unavailable"))
+	} else {
+		response.Loyalty = loyaltyResponse
 	}
-	response.Loyalty = loyaltyResponse
 
 	return ctx.JSON(http.StatusOK, response)
 }
@@ -182,8 +183,7 @@ func (srv *Server) GetStatus(ctx echo.Context) error {
 	loyalty, err := srv.loyalty.GetUser(username)
 	if err != nil {
 		log.Info().Msg(err.Error())
-		ctx.Response().Write([]byte("Loyalty Service Unavailable"))
-		return ctx.JSON(http.StatusServiceUnavailable, echo.Map{"error": err})
+		return ctx.JSON(http.StatusServiceUnavailable, "Loyalty Service Unavailable")
 	}
 	response := createLoyaltyResponse(loyalty)
 
