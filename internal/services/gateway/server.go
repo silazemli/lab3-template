@@ -182,6 +182,7 @@ func (srv *Server) GetStatus(ctx echo.Context) error {
 	loyalty, err := srv.loyalty.GetUser(username)
 	if err != nil {
 		log.Info().Msg(err.Error())
+		ctx.Response().Write([]byte("Loyalty Service Unavailable"))
 		return ctx.JSON(http.StatusServiceUnavailable, echo.Map{"error": err})
 	}
 	response := createLoyaltyResponse(loyalty)
