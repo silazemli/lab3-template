@@ -86,7 +86,6 @@ func (srv *Server) GetUser(ctx echo.Context) error {
 	loyaltyResponse := createLoyaltyResponseNoCount(theLoyalty) // out of ideas for names
 	if err != nil {
 		return ctx.JSON(http.StatusOK, echo.Map{"reservations": reservationsResponse})
-		// ctx.Response().Write([]byte("Loyalty Service Unavailable"))
 	} else {
 		response.Loyalty = loyaltyResponse
 	}
